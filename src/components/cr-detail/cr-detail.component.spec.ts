@@ -158,4 +158,143 @@ describe('CrDetailComponent', () => {
 		expect(error.textContent).toContain('Network error');
 		expect(fixture.nativeElement.querySelector('.cr-detail__header')).toBeNull();
 	});
+
+	describe('approve action', () => {
+		const pendingDetail: CrDetail = {
+			id: 'CR-1',
+			title: 'Add 1 unit of SKU-A',
+			status: 'PENDING_APPROVAL',
+			orgCode: 'org-alpha',
+			delta: 500,
+			currency: 'USD',
+			updatedAt: '2026-03-02T10:00:00.000Z',
+			agreementId: 'AGR-1',
+			baselineLineItems: [{ sku: 'SKU-A', description: 'Widget A', quantity: 10, unitPrice: 500 }],
+			proposedLineItems: [{ sku: 'SKU-A', description: 'Widget A', quantity: 11, unitPrice: 500 }],
+			baselineTotal: 8000,
+			newTotal: 8500,
+			audit: [{ action: 'CREATE', byUserId: 'alice', at: '2026-03-02T09:00:00.000Z' }],
+		};
+
+		function approvedFrom(pending: CrDetail): CrDetail {
+			return {
+				...pending,
+				status: 'APPROVED',
+				updatedAt: '2026-03-02T12:00:00.000Z',
+				audit: [
+					...pending.audit,
+					{ action: 'APPROVE', byUserId: users.approver.id, at: '2026-03-02T12:00:00.000Z' },
+				],
+			};
+		}
+
+		it('calls the approve API once and updates the UI on success', async () => {
+			const approved = approvedFrom(pendingDetail);
+			const approve = jest.fn(() => settle(approved));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					approve,
+				},
+			});
+
+			const approveBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.cr-actions__approve');
+			expect(approveBtn.disabled).toBe(false);
+
+			approveBtn.click();
+			await flush();
+			fixture.detectChanges();
+
+			expect(approve).toHaveBeenCalledTimes(1);
+			expect(approve).toHaveBeenCalledWith(users.approver, 'CR-1', expect.any(String));
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('APPROVED');
+			expect(approveBtn.disabled).toBe(true);
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-actions__error')).toBeNull();
+		});
+
+		it('does not call the approve API for a read-only viewer', async () => {
+			const approve = jest.fn(() => settle(approvedFrom(pendingDetail)));
+			const fixture = await render(users.viewer, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					approve,
+				},
+			});
+
+			await fixture.componentInstance.approve();
+			fixture.detectChanges();
+
+			expect(approve).not.toHaveBeenCalled();
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('PENDING_APPROVAL');
+		});
+
+		it('does not call the approve API for a non-pending CR', async () => {
+			const nonPending: CrDetail = { ...pendingDetail, status: 'APPLIED' };
+			const approve = jest.fn(() => settle(approvedFrom(pendingDetail)));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle(nonPending),
+					approve,
+				},
+			});
+
+			await fixture.componentInstance.approve();
+			fixture.detectChanges();
+
+			expect(approve).not.toHaveBeenCalled();
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('APPLIED');
+		});
+
+		it('ignores duplicate approve attempts while a request is in flight', async () => {
+			let resolveApprove!: (value: CrDetail) => void;
+			const approve = jest.fn(
+				() =>
+					new Promise<CrDetail>((resolve) => {
+						resolveApprove = resolve;
+					}),
+			);
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					approve,
+				},
+			});
+
+			const first = fixture.componentInstance.approve();
+			const second = fixture.componentInstance.approve();
+			fixture.detectChanges();
+
+			expect(fixture.componentInstance.submitting).toBe(true);
+			expect(fixture.nativeElement.querySelector('.cr-actions__approve').disabled).toBe(true);
+			expect(approve).toHaveBeenCalledTimes(1);
+
+			resolveApprove(approvedFrom(pendingDetail));
+			await Promise.all([first, second]);
+			fixture.detectChanges();
+
+			expect(approve).toHaveBeenCalledTimes(1);
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('APPROVED');
+		});
+
+		it('shows an action error and keeps the CR pending when approve fails', async () => {
+			const approve = jest.fn(() => settleReject('Network error'));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					approve,
+				},
+			});
+
+			await fixture.componentInstance.approve();
+			fixture.detectChanges();
+
+			expect(approve).toHaveBeenCalledTimes(1);
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('PENDING_APPROVAL');
+			expect(fixture.nativeElement.querySelector('.cr-actions__error').textContent).toContain('Network error');
+			expect(fixture.nativeElement.querySelector('.cr-actions__approve').disabled).toBe(false);
+		});
+	});
 });
