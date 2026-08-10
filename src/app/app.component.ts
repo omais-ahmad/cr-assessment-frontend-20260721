@@ -4,6 +4,8 @@ import { CrListComponent } from '../components/cr-list/cr-list.component';
 import { CrDetailComponent } from '../components/cr-detail/cr-detail.component';
 import { SessionService } from '../session/session.service';
 import { users } from '../api/fixtures';
+import { CrSummary } from '../models/cr.models';
+import { ViewState } from '../common/view-state';
 
 /**
  * Demo app shell that hosts the list + detail screens so you can click through the UI in a browser
@@ -22,6 +24,8 @@ export class AppComponent {
 	readonly users = users;
 	readonly userKeys = Object.keys(users);
 	selectedId: string | null = 'CR-1';
+	/** Detail stays hidden until the list has successfully loaded (avoids stale detail on list errors). */
+	listReady = false;
 	show = true;
 
 	constructor(public readonly session: SessionService) {}
@@ -35,8 +39,23 @@ export class AppComponent {
 		this.selectedId = id;
 	}
 
+	onListState(state: ViewState<CrSummary[]>): void {
+		if (state.status === 'loaded') {
+			this.listReady = true;
+			const ids = (state.data ?? []).map((row) => row.id);
+			if (this.selectedId && ids.includes(this.selectedId)) return;
+			this.selectedId = ids[0] ?? null;
+			return;
+		}
+
+		// empty / error / anything else — hide detail so a failed list cannot leave a prior CR on screen
+		this.listReady = false;
+		this.selectedId = null;
+	}
+
 	/** Destroy + recreate the panes so they re-load as the newly selected user. */
 	private reload(): void {
+		this.listReady = false;
 		this.show = false;
 		setTimeout(() => (this.show = true));
 	}

@@ -26,8 +26,8 @@ async function render(
 	});
 	await TestBed.compileComponents();
 	const fixture = TestBed.createComponent(CrDetailComponent);
-	fixture.componentInstance.id = id;
-	fixture.detectChanges(); // ngOnInit -> load()
+	fixture.componentRef.setInput('id', id);
+	fixture.detectChanges(); // ngOnChanges -> load()
 	if (options?.settle !== false) {
 		await flush(); // let the mock API resolve
 		fixture.detectChanges(); // render the loaded/error state
@@ -57,6 +57,19 @@ describe('CrDetailComponent', () => {
 	it('loads and renders the change request title', async () => {
 		const fixture = await render(users.approver, 'CR-1');
 		expect(fixture.nativeElement.querySelector('.cr-detail__header h2').textContent).toContain('Add 1 unit of SKU-A');
+	});
+
+	it('reloads when the id input changes to another CR', async () => {
+		const fixture = await render(users.approver, 'CR-1');
+		expect(fixture.nativeElement.querySelector('.cr-detail__header h2').textContent).toContain('Add 1 unit of SKU-A');
+
+		fixture.componentRef.setInput('id', 'CR-2');
+		fixture.detectChanges(); // ngOnChanges -> load()
+		await flush();
+		fixture.detectChanges();
+
+		expect(fixture.nativeElement.querySelector('.cr-detail__header h2').textContent).toContain('Replace SKU-B supplier');
+		expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('APPLIED');
 	});
 
 	it('renders totals and delta from the loaded CR', async () => {
@@ -125,19 +138,22 @@ describe('CrDetailComponent', () => {
 	it('enables Approve for an authorized user on a pending CR', async () => {
 		const fixture = await render(users.approver, 'CR-1');
 		const approveBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.cr-actions__approve');
+		expect(approveBtn).not.toBeNull();
 		expect(approveBtn.disabled).toBe(false);
 	});
 
-	it('disables Approve for a read-only viewer on a pending CR', async () => {
+	it('hides Approve for a read-only viewer on a pending CR', async () => {
 		const fixture = await render(users.viewer, 'CR-1'); // viewer: cr_r_o only; CR-1 is PENDING_APPROVAL
-		const approveBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.cr-actions__approve');
-		expect(approveBtn.disabled).toBe(true);
+		expect(fixture.nativeElement.querySelector('.cr-detail__header')).not.toBeNull();
+		expect(fixture.nativeElement.querySelector('.cr-actions__approve')).toBeNull();
+		expect(fixture.nativeElement.querySelector('.cr-actions__reject')).toBeNull();
 	});
 
-	it('disables Approve for a non-pending CR even when the user can approve', async () => {
+	it('hides Approve for a non-pending CR even when the user can approve', async () => {
 		const fixture = await render(users.approver, 'CR-2'); // APPLIED
-		const approveBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.cr-actions__approve');
-		expect(approveBtn.disabled).toBe(true);
+		expect(fixture.nativeElement.querySelector('.cr-detail__header')).not.toBeNull();
+		expect(fixture.nativeElement.querySelector('.cr-actions__approve')).toBeNull();
+		expect(fixture.nativeElement.querySelector('.cr-actions__reject')).toBeNull();
 	});
 
 	it('shows the loading state before the API settles', async () => {
@@ -208,7 +224,7 @@ describe('CrDetailComponent', () => {
 			expect(approve).toHaveBeenCalledTimes(1);
 			expect(approve).toHaveBeenCalledWith(users.approver, 'CR-1', expect.any(String));
 			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('APPROVED');
-			expect(approveBtn.disabled).toBe(true);
+			expect(fixture.nativeElement.querySelector('.cr-actions__approve')).toBeNull();
 			expect(fixture.componentInstance.submitting).toBe(false);
 			expect(fixture.nativeElement.querySelector('.cr-actions__error')).toBeNull();
 		});
@@ -351,7 +367,7 @@ describe('CrDetailComponent', () => {
 			expect(reject).toHaveBeenCalledWith(users.approver, 'CR-1', expect.any(String), reason);
 			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('REJECTED');
 			expect(fixture.nativeElement.querySelector('.cr-actions__reject')).toBeNull();
-			expect(fixture.nativeElement.querySelector('.cr-actions__approve').disabled).toBe(true);
+			expect(fixture.nativeElement.querySelector('.cr-actions__approve')).toBeNull();
 			expect(fixture.componentInstance.submitting).toBe(false);
 			expect(fixture.nativeElement.querySelector('.cr-actions__error')).toBeNull();
 		});

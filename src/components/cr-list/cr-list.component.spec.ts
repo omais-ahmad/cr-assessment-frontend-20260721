@@ -93,6 +93,24 @@ describe('CrListComponent', () => {
 		expect(fixture.nativeElement.querySelector('.cr-list__table')).toBeNull();
 	});
 
+	it('emits stateChange with error so the shell can hide detail', async () => {
+		const states: string[] = [];
+		TestBed.configureTestingModule({
+			imports: [CrListComponent],
+			providers: [
+				{ provide: SessionService, useValue: { user: users.approver } },
+				{ provide: CrApiService, useValue: { listChangeRequests: () => settleReject('Network error') } },
+			],
+		});
+		await TestBed.compileComponents();
+		const fixture = TestBed.createComponent(CrListComponent);
+		fixture.componentInstance.stateChange.subscribe((state) => states.push(state.status));
+		fixture.detectChanges();
+		await flush();
+		fixture.detectChanges();
+		expect(states[states.length - 1]).toBe('error');
+	});
+
 	describe('status filter', () => {
 		async function renderMixed(): Promise<ComponentFixture<CrListComponent>> {
 			return render(users.approver, {

@@ -18,6 +18,8 @@ import { idle, loading, ViewState } from '../../common/view-state';
 })
 export class CrListComponent implements OnInit {
 	@Output() select = new EventEmitter<string>();
+	/** Lets the demo shell keep the detail pane in sync with list load success/failure. */
+	@Output() stateChange = new EventEmitter<ViewState<CrSummary[]>>();
 
 	state: ViewState<CrSummary[]> = idle();
 	statusFilter: CrStatus | 'ALL' = 'ALL';
@@ -37,6 +39,7 @@ export class CrListComponent implements OnInit {
 		} catch (err) {
 			this.state = { status: 'error', data: null, error: (err as Error).message };
 		}
+		this.stateChange.emit(this.state);
 	}
 
 	onFilterChange(value: string): void {

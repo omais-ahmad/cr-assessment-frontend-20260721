@@ -1,4 +1,4 @@
-import { Component, Input, OnInit } from '@angular/core';
+import { Component, Input, OnChanges, SimpleChanges } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { AbstractControl, FormControl, ReactiveFormsModule, ValidationErrors } from '@angular/forms';
 import { CrApiService } from '../../api/cr-api.service';
@@ -25,7 +25,7 @@ function requiredTrimmed(control: AbstractControl): ValidationErrors | null {
 	imports: [CommonModule, ReactiveFormsModule],
 	templateUrl: './cr-detail.component.html',
 })
-export class CrDetailComponent implements OnInit {
+export class CrDetailComponent implements OnChanges {
 	@Input() id!: string;
 
 	state: ViewState<CrDetail> = idle();
@@ -35,13 +35,17 @@ export class CrDetailComponent implements OnInit {
 
 	constructor(private readonly api: CrApiService, private readonly session: SessionService) {}
 
-	ngOnInit(): void {
-		void this.load();
+	ngOnChanges(changes: SimpleChanges): void {
+		if (changes['id'] && this.id) {
+			void this.load();
+		}
 	}
 
 	async load(): Promise<void> {
 		this.state = loading();
 		this.actionError = undefined;
+		this.submitting = false;
+		this.rejectControl.reset('');
 		try {
 			const detail = await this.api.getChangeRequest(this.session.user, this.id);
 			this.state = { status: 'loaded', data: detail };

@@ -51,7 +51,7 @@
 		<section class="cr-actions">
 			<p *ngIf="actionError" class="cr-actions__error" role="alert">{{ actionError }}</p>
 
-			<button type="button" class="cr-actions__approve" [disabled]="!canApprove || submitting" (click)="approve()">
+			<button type="button" class="cr-actions__approve" [disabled]="!canApprove || submitting" (click)="approve()" *ngIf="canApprove">
 				Approve
 			</button>
 
