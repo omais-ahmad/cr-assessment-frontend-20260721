@@ -12,9 +12,6 @@ export interface DiffRow {
 /**
  * Compute the line-item diff shown in the preview panel: which SKUs were added, removed, changed,
  * or left unchanged between the baseline and the proposed line items.
- *
- * Heads-up: the change-detection here is not quite right — a line that changed is sometimes reported
- * as unchanged. `diff.spec.ts` surfaces the defect; the root cause lives in this file.
  */
 export function computeDiff(baseline: LineItem[], proposed: LineItem[]): DiffRow[] {
 	const rows: DiffRow[] = [];
@@ -27,7 +24,8 @@ export function computeDiff(baseline: LineItem[], proposed: LineItem[]): DiffRow
 			rows.push({ sku: b.sku, kind: 'removed', baseline: b });
 			continue;
 		}
-		const changed = b.unitPrice !== p.unitPrice;
+		const changed =
+			b.quantity !== p.quantity || b.unitPrice !== p.unitPrice || b.description !== p.description;
 		rows.push({ sku: b.sku, kind: changed ? 'changed' : 'unchanged', baseline: b, proposed: p });
 	}
 	for (const p of proposed) {
