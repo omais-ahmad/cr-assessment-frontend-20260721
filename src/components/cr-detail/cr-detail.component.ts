@@ -1,6 +1,6 @@
 import { Component, Input, OnInit } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormControl, ReactiveFormsModule } from '@angular/forms';
+import { AbstractControl, FormControl, ReactiveFormsModule, ValidationErrors } from '@angular/forms';
 import { CrApiService } from '../../api/cr-api.service';
 import { SessionService } from '../../session/session.service';
 import { CrDetail, TimelineEntry } from '../../models/cr.models';
@@ -8,6 +8,11 @@ import { idle, loading, ViewState } from '../../common/view-state';
 import { computeDiff, DiffRow } from '../diff.util';
 import { formatMoney } from '../../common/money.util';
 import { canApprovePolicy } from '../../common/permissions';
+
+/** Reject reason must contain non-whitespace text. */
+function requiredTrimmed(control: AbstractControl): ValidationErrors | null {
+	return typeof control.value === 'string' && control.value.trim().length > 0 ? null : { required: true };
+}
 
 /**
  * Change Request DETAIL page: loads a CR and renders the diff/preview, the approval timeline, and
@@ -26,8 +31,7 @@ export class CrDetailComponent implements OnInit {
 	state: ViewState<CrDetail> = idle();
 	submitting = false;
 	actionError?: string;
-	// TODO: add validation so the form is invalid until a reason is entered.
-	rejectControl = new FormControl('', { nonNullable: true });
+	rejectControl = new FormControl('', { nonNullable: true, validators: [requiredTrimmed] });
 
 	constructor(private readonly api: CrApiService, private readonly session: SessionService) {}
 
@@ -65,8 +69,9 @@ export class CrDetailComponent implements OnInit {
 		return this.detail?.status === 'PENDING_APPROVAL' && canApprovePolicy(this.session.user);
 	}
 
+	/** Whether the current user may reject the loaded CR (same approval-workflow policies). */
 	get canReject(): boolean {
-		return this.detail?.status === 'PENDING_APPROVAL';
+		return this.detail?.status === 'PENDING_APPROVAL' && canApprovePolicy(this.session.user);
 	}
 
 	fmt(amount: number): string {
@@ -89,8 +94,19 @@ export class CrDetailComponent implements OnInit {
 	}
 
 	async reject(): Promise<void> {
-		// TODO: require a valid rejectControl, then perform the reject action through the API and
-		//       reflect the outcome in the view.
-		throw new Error('reject() not implemented');
+		this.rejectControl.markAsTouched();
+		if (!this.canReject || this.submitting || this.rejectControl.invalid) return;
+
+		const reason = this.rejectControl.value.trim();
+		this.submitting = true;
+		this.actionError = undefined;
+		try {
+			const updated = await this.api.reject(this.session.user, this.id, new Date().toISOString(), reason);
+			this.state = { status: 'loaded', data: updated };
+		} catch (err) {
+			this.actionError = (err as Error).message;
+		} finally {
+			this.submitting = false;
+		}
 	}
 }

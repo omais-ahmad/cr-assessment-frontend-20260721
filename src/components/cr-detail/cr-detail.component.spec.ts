@@ -297,4 +297,191 @@ describe('CrDetailComponent', () => {
 			expect(fixture.nativeElement.querySelector('.cr-actions__approve').disabled).toBe(false);
 		});
 	});
+
+	describe('reject action', () => {
+		const pendingDetail: CrDetail = {
+			id: 'CR-1',
+			title: 'Add 1 unit of SKU-A',
+			status: 'PENDING_APPROVAL',
+			orgCode: 'org-alpha',
+			delta: 500,
+			currency: 'USD',
+			updatedAt: '2026-03-02T10:00:00.000Z',
+			agreementId: 'AGR-1',
+			baselineLineItems: [{ sku: 'SKU-A', description: 'Widget A', quantity: 10, unitPrice: 500 }],
+			proposedLineItems: [{ sku: 'SKU-A', description: 'Widget A', quantity: 11, unitPrice: 500 }],
+			baselineTotal: 8000,
+			newTotal: 8500,
+			audit: [{ action: 'CREATE', byUserId: 'alice', at: '2026-03-02T09:00:00.000Z' }],
+		};
+
+		function rejectedFrom(pending: CrDetail, reason: string): CrDetail {
+			return {
+				...pending,
+				status: 'REJECTED',
+				updatedAt: '2026-03-02T12:30:00.000Z',
+				audit: [
+					...pending.audit,
+					{ action: 'REJECT', byUserId: users.approver.id, at: '2026-03-02T12:30:00.000Z', note: reason },
+				],
+			};
+		}
+
+		it('calls the reject API once with the trimmed reason and updates the UI on success', async () => {
+			const reason = 'Pricing exceeds agreement';
+			const rejected = rejectedFrom(pendingDetail, reason);
+			const reject = jest.fn(() => settle(rejected));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					reject,
+				},
+			});
+
+			fixture.componentInstance.rejectControl.setValue(`  ${reason}  `);
+			fixture.detectChanges();
+			const rejectBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.cr-actions__reject-btn');
+			expect(rejectBtn.disabled).toBe(false);
+
+			rejectBtn.click();
+			await flush();
+			fixture.detectChanges();
+
+			expect(reject).toHaveBeenCalledTimes(1);
+			expect(reject).toHaveBeenCalledWith(users.approver, 'CR-1', expect.any(String), reason);
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('REJECTED');
+			expect(fixture.nativeElement.querySelector('.cr-actions__reject')).toBeNull();
+			expect(fixture.nativeElement.querySelector('.cr-actions__approve').disabled).toBe(true);
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-actions__error')).toBeNull();
+		});
+
+		it('does not call the reject API for a read-only viewer', async () => {
+			const reject = jest.fn(() => settle(rejectedFrom(pendingDetail, 'nope')));
+			const fixture = await render(users.viewer, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					reject,
+				},
+			});
+
+			expect(fixture.nativeElement.querySelector('.cr-actions__reject')).toBeNull();
+			fixture.componentInstance.rejectControl.setValue('Not allowed');
+			await fixture.componentInstance.reject();
+			fixture.detectChanges();
+
+			expect(reject).not.toHaveBeenCalled();
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('PENDING_APPROVAL');
+		});
+
+		it('does not call the reject API for a non-pending CR', async () => {
+			const nonPending: CrDetail = { ...pendingDetail, status: 'APPLIED' };
+			const reject = jest.fn(() => settle(rejectedFrom(pendingDetail, 'nope')));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle(nonPending),
+					reject,
+				},
+			});
+
+			fixture.componentInstance.rejectControl.setValue('Too late');
+			await fixture.componentInstance.reject();
+			fixture.detectChanges();
+
+			expect(reject).not.toHaveBeenCalled();
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('APPLIED');
+			expect(fixture.nativeElement.querySelector('.cr-actions__reject')).toBeNull();
+		});
+
+		it('blocks reject when the reason is empty without submitting', async () => {
+			const reject = jest.fn(() => settle(rejectedFrom(pendingDetail, 'nope')));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					reject,
+				},
+			});
+
+			fixture.componentInstance.rejectControl.setValue('');
+			await fixture.componentInstance.reject();
+			fixture.detectChanges();
+
+			expect(reject).not.toHaveBeenCalled();
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-actions__reason-error')).not.toBeNull();
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('PENDING_APPROVAL');
+		});
+
+		it('blocks reject when the reason is whitespace-only without submitting', async () => {
+			const reject = jest.fn(() => settle(rejectedFrom(pendingDetail, 'nope')));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					reject,
+				},
+			});
+
+			fixture.componentInstance.rejectControl.setValue('   \t  ');
+			await fixture.componentInstance.reject();
+			fixture.detectChanges();
+
+			expect(reject).not.toHaveBeenCalled();
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-actions__reason-error')).not.toBeNull();
+			expect(fixture.nativeElement.querySelector('.cr-actions__reject-btn').disabled).toBe(true);
+		});
+
+		it('ignores duplicate reject attempts while a request is in flight', async () => {
+			let resolveReject!: (value: CrDetail) => void;
+			const reject = jest.fn(
+				() =>
+					new Promise<CrDetail>((resolve) => {
+						resolveReject = resolve;
+					}),
+			);
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					reject,
+				},
+			});
+
+			fixture.componentInstance.rejectControl.setValue('Duplicate guard');
+			const first = fixture.componentInstance.reject();
+			const second = fixture.componentInstance.reject();
+			fixture.detectChanges();
+
+			expect(fixture.componentInstance.submitting).toBe(true);
+			expect(fixture.nativeElement.querySelector('.cr-actions__reject-btn').disabled).toBe(true);
+			expect(reject).toHaveBeenCalledTimes(1);
+
+			resolveReject(rejectedFrom(pendingDetail, 'Duplicate guard'));
+			await Promise.all([first, second]);
+			fixture.detectChanges();
+
+			expect(reject).toHaveBeenCalledTimes(1);
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('REJECTED');
+		});
+
+		it('shows an action error and keeps the CR pending when reject fails', async () => {
+			const reject = jest.fn(() => settleReject('Network error'));
+			const fixture = await render(users.approver, 'CR-1', {
+				api: {
+					getChangeRequest: () => settle({ ...pendingDetail }),
+					reject,
+				},
+			});
+
+			fixture.componentInstance.rejectControl.setValue('Still pending after failure');
+			await fixture.componentInstance.reject();
+			fixture.detectChanges();
+
+			expect(reject).toHaveBeenCalledTimes(1);
+			expect(fixture.componentInstance.submitting).toBe(false);
+			expect(fixture.nativeElement.querySelector('.cr-status').textContent).toContain('PENDING_APPROVAL');
+			expect(fixture.nativeElement.querySelector('.cr-actions__error').textContent).toContain('Network error');
+			expect(fixture.nativeElement.querySelector('.cr-actions__reject-btn').disabled).toBe(false);
+		});
+	});
 });
